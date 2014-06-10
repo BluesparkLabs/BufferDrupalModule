@@ -5,7 +5,6 @@
  * Sends Drupal posts to BufferApp to post on social media profiles.
  */
 
-
 /**
  * Implements hook_permission().
  */
@@ -21,7 +20,6 @@ function buffer_permission() {
     ),
   );
 }
-
 
 /**
  * Implements hook_menu().
@@ -60,7 +58,6 @@ function buffer_menu() {
   return $items;
 }
 
-
 /**
  * Implements hook_admin_paths().
  */
@@ -72,7 +69,6 @@ function buffer_admin_paths() {
   return $paths;
 }
 
-
 /**
  * Implements hook_theme().
  */
@@ -83,7 +79,6 @@ function buffer_theme() {
     )
   );
 }
-
 
 /**
  * Create the main form.
@@ -108,7 +103,7 @@ function buffer_social_form($form, &$form_state, $node) {
     $buffer_profile_ids = variable_get('buffer_profile_ids', array());
 
     if (empty($buffer_profile_ids)) {
-      drupal_set_message(t('You must select at least one profiles in the <a href="@conf_link">configuration page</a>!', array('@conf_link' => '/admin/config/services/buffer')), 'error');
+      drupal_set_message(t('You must select at least one profile on the <a href="@conf_link">configuration page</a>!', array('@conf_link' => '/admin/config/services/buffer')), 'error');
 
       return $form;
     }
@@ -128,14 +123,16 @@ function buffer_social_form($form, &$form_state, $node) {
           $form['activity'][$profile['id']] = _buffer_build_pending_updates_form($activity, $profile);
         }
 
-        if ($profile['service'] == 'twitter') $twitter = TRUE;
+        if ($profile['service'] == 'twitter') {
+          $twitter = TRUE;
+        }
       }
     }
 
     $form['activity']['delete'] = array(
       '#type' => 'submit',
       '#value' => t('Delete selected updates'),
-      '#attributes' => array('onclick' => 'if(!confirm("Really Delete?")){return false;}'),
+      '#attributes' => array('onclick' => 'if(!confirm("Do you really want to delete the selected updates?")){return false;}'),
     );
 
     $options = array();
@@ -146,7 +143,7 @@ function buffer_social_form($form, &$form_state, $node) {
     }
 
     $form['profiles'] = array(
-      '#title' => t('Profiles:'),
+      '#title' => t('Profiles') . ':',
       '#type' => 'checkboxes',
       '#options' => $options,
       '#default_value' => variable_get('buffer_profile_ids', array()),
@@ -158,7 +155,7 @@ function buffer_social_form($form, &$form_state, $node) {
     );
   }
   else {
-    drupal_set_message(t('Impossible to retrive profiles list.'), 'error');
+    drupal_set_message(t('There was a problem retrieving the profile list.'), 'error');
 
     return $form;
   }
@@ -166,7 +163,7 @@ function buffer_social_form($form, &$form_state, $node) {
   $form['override_text'] = array(
     '#title' => t('Override text for each profile'),
     '#type' => 'checkbox',
-    '#description' => t('If checked you can specific different text for each profile.'),
+    '#description' => t('Check the box to specify different text for each profile.'),
     '#ajax' =>array(
       'callback' => 'buffer_override_ajax_callback',
       'wrapper' => 'text-source',
@@ -302,7 +299,6 @@ function buffer_social_form($form, &$form_state, $node) {
   return $form;
 }
 
-
 /**
  * Ajax callback for "Image source" options.
  */
@@ -310,14 +306,12 @@ function buffer_ajax_callback($form, &$form_state) {
   return $form['image'];
 }
 
-
 /**
  * Ajax callback for "Override text for each profile" option.
  */
 function buffer_override_ajax_callback($form, &$form_state) {
   return $form['text'];
 }
-
 
 /**
  * Validation callback for buffer_social_form().
@@ -342,11 +336,10 @@ function buffer_social_form_validate($form, &$form_state) {
   else {
     $profiles = array_filter($form_state['values']['profiles']);
     if (empty($profiles)) {
-      form_set_error('profiles', t('Select at least one profiles!'));
+      form_set_error('profiles', t('Please select at least one profile!'));
     }
   }
 }
-
 
 /**
  * Handle submission of the form.
@@ -362,8 +355,12 @@ function buffer_social_form_submit($form, &$form_state) {
       foreach ($updates as $update) {
         $success = buffer_destroy_update($update);
 
-        if ($success) drupal_set_message(t('Your update has been deleted.'));
-        else drupal_set_message(t('An error has been occurred during update deleting'), 'error');
+        if ($success) {
+          drupal_set_message(t('Your update has been deleted.'));
+        }
+        else {
+          drupal_set_message(t('An error has been occurred during update deleting'), 'error');
+        }
       }
     }
   }
@@ -371,8 +368,8 @@ function buffer_social_form_submit($form, &$form_state) {
     if ($form_state['values']['image_source'] == 'existing') {
       $node = node_load($form_state['values']['nid']);
       $image_field = array_pop(array_keys(array_filter($form_state['values']['image']['image_field'])));
-      $image_field = $node->$image_field;
-      $image = file_load($image_field['und'][0]['fid']);
+      $field = field_get_items('node', $node, $image_field);
+      $image = file_load($field[0]['fid']);
     }
     elseif ($form_state['values']['image_source'] == 'custom') {
       $image = file_load($form_state['values']['image']['image_custom']);
@@ -383,16 +380,16 @@ function buffer_social_form_submit($form, &$form_state) {
       $text = $form_state['values']['text']['global'];
 
       if ($form_state['values']['append_url']) {
-        $text .= ' ' . url(drupal_get_path_alias('node/' . $form_state['values']['nid']), array('absolute' => TRUE));
+        $text .= ' ' . url('node/' . $form_state['values']['nid'], array('absolute' => TRUE));
       }
 
       $success = buffer_create_updates($text, array_keys(array_filter($form_state['values']['profiles'])), $image->uri, $form_state['values']['scheduled_at'], $form_state['values']['shorten_url']);
 
       if ($success) {
-        drupal_set_message(t('Your publications has been scheduled.'));
+        drupal_set_message(t('Your publications have been scheduled.'));
       }
       else {
-        drupal_set_message(t('An error has been occurred during publication.'), 'error');
+        drupal_set_message(t('An error occurred during publication.'), 'error');
       }
     }
     else {
@@ -402,22 +399,21 @@ function buffer_social_form_submit($form, &$form_state) {
         $text = $form_state['values']['text'][$pid];
 
         if ($form_state['values']['append_url']) {
-          $text .= ' ' . url(drupal_get_path_alias('node/' . $form_state['values']['nid']), array('absolute' => TRUE));
+          $text .= ' ' . url('node/' . $form_state['values']['nid'], array('absolute' => TRUE));
         }
 
         $success = buffer_create_updates($text, $pid, $image->uri, $form_state['values']['scheduled_at'], $form_state['values']['shorten_url']);
 
         if ($success) {
-          drupal_set_message(t('Your publications has been scheduled.'));
+          drupal_set_message(t('Your publications have been scheduled.'));
         }
         else {
-          drupal_set_message(t('An error has been occurred during publication.'), 'error');
+          drupal_set_message(t('An error occurred during publication.'), 'error');
         }
       }
     }
   }
 }
-
 
 /**
  * Implements buffer_thumb_upload theme callback.
@@ -433,7 +429,6 @@ function theme_buffer_thumb_upload($variables) {
     return $output;
   }
 }
-
 
 /**
  * Implements hook_form_FORM_ID_alter() for the node type form.
@@ -459,7 +454,6 @@ function buffer_form_node_type_form_alter(&$form, &$form_state) {
   );
 }
 
-
 /**
  * Implements hook_features_pipe_COMPONENT_alter().
  */
@@ -468,7 +462,6 @@ function buffer_features_pipe_node_alter(&$pipe, $data, $export) {
     $pipe['variable'][] = 'buffer_' . $type;
   }
 }
-
 
 /**
  * Create one or more new status updates.
@@ -495,7 +488,6 @@ function buffer_create_updates($text, $pid, $image_uri, $scheduled_at, $shorten)
   return FALSE;
 }
 
-
 /**
  * Returns an array of social media profiles connected to a users account.
  *
@@ -513,7 +505,6 @@ function buffer_get_profiles() {
 
   return FALSE;
 }
-
 
 /**
  * Permanently delete an existing status update.
@@ -533,7 +524,6 @@ function buffer_destroy_update($update) {
   return FALSE;
 }
 
-
 /**
  * Returns an array of updates that are currently in the buffer for an individual social media profile.
  *
@@ -551,7 +541,6 @@ function buffer_get_pending_updates($pid) {
 
   return FALSE;
 }
-
 
 /**
  * Build form array for pending updates in an individual profile.
@@ -599,7 +588,6 @@ function _buffer_build_pending_updates_form($activity, $profile) {
   return $form;
 }
 
-
 /**
  * Get a list of all image fields in a content type.
  */
@@ -617,7 +605,6 @@ function _buffer_image_fields($content_type) {
   return $fields;
 }
 
-
 /**
  * Determine whether the current user can access the buffer tab on the selected node.
  *
@@ -627,7 +614,9 @@ function _buffer_image_fields($content_type) {
 function _buffer_access_buffer($node) {
   $access = FALSE;
 
-  if ( (variable_get('buffer_' . $node->type, 0) == 1) && user_access('access buffer') ) $access = TRUE;
+  if ( (variable_get('buffer_' . $node->type, 0) == 1) && user_access('access buffer') ) {
+    $access = TRUE;
+  }
 
   return $access;
 }
