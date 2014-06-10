@@ -1,0 +1,633 @@
+<?php
+
+/**
+ * @file
+ * Sends Drupal posts to BufferApp to post on social media profiles.
+ */
+
+
+/**
+ * Implements hook_permission().
+ */
+function buffer_permission() {
+  return array(
+    'administer buffer' => array(
+      'title' => t('Administer Buffer'),
+      'description' => t('Access the Buffer administration pages.'),
+    ),
+    'access buffer' => array(
+      'title' => t('Access Buffer'),
+      'description' => t('Access the Buffer node page.'),
+    ),
+  );
+}
+
+
+/**
+ * Implements hook_menu().
+ */
+function buffer_menu() {
+  $items['node/%node/social'] = array(
+    'title' => 'Buffer',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('buffer_social_form', 1),
+    'access callback' => '_buffer_access_buffer',
+    'access arguments' => array(1),
+    'type' => MENU_LOCAL_TASK,
+    'weight' => 1,
+  );
+
+  $items['admin/config/services/buffer'] = array(
+    'title' => 'Buffer',
+    'description' => 'Manage Buffer Settings.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('buffer_admin_form'),
+    'access arguments' => array('administer buffer'),
+    'file' => 'buffer.admin.inc',
+    'type' => MENU_NORMAL_ITEM,
+  );
+
+  $items['admin/config/services/buffer-activity'] = array(
+    'title' => 'Buffer Scheduled Activity',
+    'description' => 'View all pending updates.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('buffer_scheduled_activity'),
+    'access arguments' => array('access buffer'),
+    'file' => 'buffer.admin.inc',
+    'type' => MENU_NORMAL_ITEM,
+  );
+
+  return $items;
+}
+
+
+/**
+ * Implements hook_admin_paths().
+ */
+function buffer_admin_paths() {
+  $paths = array(
+    'node/*/social' => TRUE,
+  );
+
+  return $paths;
+}
+
+
+/**
+ * Implements hook_theme().
+ */
+function buffer_theme() {
+  return array(
+    'buffer_thumb_upload' => array(
+      'render element' => 'element',
+    )
+  );
+}
+
+
+/**
+ * Create the main form.
+ */
+function buffer_social_form($form, &$form_state, $node) {
+  $form['#tree'] = TRUE;
+
+  $form['nid'] = array(
+    '#type' => 'hidden',
+    '#value' => $node->nid,
+  );
+
+  $twitter = FALSE;
+
+  $override_text = FALSE;
+  if (isset($form_state['values']['override_text'])) {
+    if ($form_state['values']['override_text'] == 1) $override_text = TRUE;
+  }
+
+  $profiles = buffer_get_profiles();
+  if ($profiles !== FALSE) {
+    $buffer_profile_ids = variable_get('buffer_profile_ids', array());
+
+    if (empty($buffer_profile_ids)) {
+      drupal_set_message(t('You must select at least one profiles in the <a href="@conf_link">configuration page</a>!', array('@conf_link' => '/admin/config/services/buffer')), 'error');
+
+      return $form;
+    }
+
+    $form['activity'] = array(
+      '#type' => 'fieldset',
+      '#title' => t('SCHEDULED ACTIVITY'),
+      '#collapsible' => TRUE,
+      '#collapsed' => TRUE,
+    );
+
+    foreach ($profiles as $profile) {
+      if (in_array($profile['id'], $buffer_profile_ids)) {
+        $activity = buffer_get_pending_updates($profile['id']);
+
+        if ($activity !== FALSE) {
+          $form['activity'][$profile['id']] = _buffer_build_pending_updates_form($activity, $profile);
+        }
+
+        if ($profile['service'] == 'twitter') $twitter = TRUE;
+      }
+    }
+
+    $form['activity']['delete'] = array(
+      '#type' => 'submit',
+      '#value' => t('Delete selected updates'),
+      '#attributes' => array('onclick' => 'if(!confirm("Really Delete?")){return false;}'),
+    );
+
+    $options = array();
+    foreach ($profiles as $profile) {
+      if (in_array($profile['id'], $buffer_profile_ids)) {
+        $options[$profile['id']] = $profile['formatted_service'] . ' (' . $profile['formatted_username'] . ')';
+      }
+    }
+
+    $form['profiles'] = array(
+      '#title' => t('Profiles:'),
+      '#type' => 'checkboxes',
+      '#options' => $options,
+      '#default_value' => variable_get('buffer_profile_ids', array()),
+      '#ajax' => array(
+        'callback' => 'buffer_override_ajax_callback',
+        'wrapper' => 'text-source',
+        'effect' => 'fade',
+      ),
+    );
+  }
+  else {
+    drupal_set_message(t('Impossible to retrive profiles list.'), 'error');
+
+    return $form;
+  }
+
+  $form['override_text'] = array(
+    '#title' => t('Override text for each profile'),
+    '#type' => 'checkbox',
+    '#description' => t('If checked you can specific different text for each profile.'),
+    '#ajax' =>array(
+      'callback' => 'buffer_override_ajax_callback',
+      'wrapper' => 'text-source',
+      'effect' => 'fade',
+    ),
+  );
+
+  $form['text'] = array(
+    '#type' => 'container',
+    '#prefix' => '<div id="text-source">',
+    '#suffix' => '</div>',
+  );
+
+  if ($override_text === FALSE) {
+    $form['text']['global'] = array(
+      '#type' => 'textarea',
+      '#title' => t('Text:'),
+      '#resizable' => TRUE,
+      '#rows' => 5,
+      '#required' => TRUE,
+    );
+
+    if ($twitter) {
+      $form['text']['global']['#attributes'] = array(
+        'class' => array(
+          'countdown',
+          'limit_117_',
+        ),
+      );
+      $form['text']['global']['#field_suffix'] = '<span style="float: right;" class="remaining">94 ' . t('characters remaining.') . '</span>';
+    }
+  }
+  else {
+    $selected_profiles = array_keys(array_filter($form_state['values']['profiles']));
+    foreach ($profiles as $profile) {
+      if (in_array($profile['id'], $selected_profiles)) {
+        $form['text'][$profile['id']] = array(
+          '#type' => 'textarea',
+          '#title' => t('Text for @profile:', array('@profile' => $profile['formatted_service'] . ' (' . $profile['formatted_username'] . ')')),
+          '#resizable' => TRUE,
+          '#rows' => 5,
+          '#required' => TRUE,
+        );
+
+        if ($profile['service'] == 'twitter') {
+          $form['text'][$profile['id']]['#attributes'] = array(
+            'class' => array(
+              'countdown',
+              'limit_117_',
+            ),
+          );
+          $form['text'][$profile['id']]['#field_suffix'] = '<span style="float: right;" class="remaining">94 ' . t('characters remaining.') . '</span>';
+        }
+      }
+    }
+  }
+
+  $form['append_url'] = array(
+    '#title' => t('Append node url'),
+    '#type' => 'checkbox',
+    '#description' => t('If checked full node url is appended to the text.'),
+    '#default_value' => '1',
+  );
+
+  $form['image_source'] = array(
+    '#type' => 'radios',
+    '#title' => t('Image source:'),
+    '#options' => array('custom' => 'Custom image', 'existing' => 'Existing image from field'),
+    '#default_value' => 'existing',
+    '#ajax' =>array(
+      'callback' => 'buffer_ajax_callback',
+      'wrapper' => 'image-source',
+      'effect' => 'fade',
+    ),
+  );
+
+  $form['image'] = array(
+    '#type' => 'container',
+    '#prefix' => '<div id="image-source">',
+    '#suffix' => '</div>',
+  );
+
+  $image_source = (isset($form_state['values']['image_source'])) ? $form_state['values']['image_source'] : 'existing';
+
+  if (isset($form_state['clicked_button']['#name'])) {
+    if ($form_state['clicked_button']['#name'] == 'image_image_custom_upload_button') $image_source = 'custom';
+  }
+
+  if ($image_source == 'custom') {
+    $form['image']['image_custom'] = array(
+      '#type' => 'managed_file',
+      '#title' => t('Image:'),
+      '#description' => t('Allowed extensions: gif png jpg jpeg'),
+      '#upload_location' => 'public://',
+      '#theme' => 'buffer_thumb_upload',
+      '#upload_validators' => array(
+        'file_validate_extensions' => array('gif png jpg jpeg'),
+      ),
+      '#required' => TRUE,
+    );
+  }
+  else {
+    $fields = _buffer_image_fields($node->type);
+    $form['image']['image_field'] = array(
+      '#title' => t('Select a field:'),
+      '#type' => 'checkboxes',
+      '#options' => $fields,
+      '#required' => TRUE,
+    );
+  }
+
+  $form['scheduled_at'] = array(
+    '#type' => 'date_select',
+    '#title' => t('Scheduled At:'),
+    '#default_value' => date('Y-m-d H:i'),
+    '#required' => TRUE,
+  );
+
+  $form['shorten_url'] = array(
+    '#title' => t('Shorten url'),
+    '#type' => 'checkbox',
+    '#description' => t('If checked links within the text will be automatically shortened.'),
+    '#default_value' => '1',
+  );
+
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Publish'),
+  );
+
+  $form['#attached']['js'][] = drupal_get_path('module', 'buffer') . '/js/buffer.js';
+
+  return $form;
+}
+
+
+/**
+ * Ajax callback for "Image source" options.
+ */
+function buffer_ajax_callback($form, &$form_state) {
+  return $form['image'];
+}
+
+
+/**
+ * Ajax callback for "Override text for each profile" option.
+ */
+function buffer_override_ajax_callback($form, &$form_state) {
+  return $form['text'];
+}
+
+
+/**
+ * Validation callback for buffer_social_form().
+ */
+function buffer_social_form_validate($form, &$form_state) {
+  if ($form_state['clicked_button']['#id'] == 'edit-activity-delete') {
+    form_clear_error();
+    drupal_get_messages('error');
+
+    $activity = $form_state['values']['activity'];
+    unset($activity['delete']);
+
+    $updates = array();
+    foreach ($activity as $p) {
+      $updates = array_merge($updates, array_keys(array_filter($p)));
+    }
+
+    if (count($updates) == 0) {
+      form_set_error('activity', t('Select at least one update to delete!'));
+    }
+  }
+  else {
+    $profiles = array_filter($form_state['values']['profiles']);
+    if (empty($profiles)) {
+      form_set_error('profiles', t('Select at least one profiles!'));
+    }
+  }
+}
+
+
+/**
+ * Handle submission of the form.
+ */
+function buffer_social_form_submit($form, &$form_state) {
+  if ($form_state['clicked_button']['#id'] == 'edit-activity-delete') {
+    $access_token = 'access_token=' . variable_get('buffer_access_token', '');
+
+    unset($form_state['values']['activity']['delete']);
+    foreach ($form_state['values']['activity'] as $activity) {
+      $updates = array_keys(array_filter($activity));
+
+      foreach ($updates as $update) {
+        $success = buffer_destroy_update($update);
+
+        if ($success) drupal_set_message(t('Your update has been deleted.'));
+        else drupal_set_message(t('An error has been occurred during update deleting'), 'error');
+      }
+    }
+  }
+  else {
+    if ($form_state['values']['image_source'] == 'existing') {
+      $node = node_load($form_state['values']['nid']);
+      $image_field = array_pop(array_keys(array_filter($form_state['values']['image']['image_field'])));
+      $image_field = $node->$image_field;
+      $image = file_load($image_field['und'][0]['fid']);
+    }
+    elseif ($form_state['values']['image_source'] == 'custom') {
+      $image = file_load($form_state['values']['image']['image_custom']);
+    }
+
+    $override_text = FALSE;
+    if ($form_state['values']['override_text'] == 0) {
+      $text = $form_state['values']['text']['global'];
+
+      if ($form_state['values']['append_url']) {
+        $text .= ' ' . url(drupal_get_path_alias('node/' . $form_state['values']['nid']), array('absolute' => TRUE));
+      }
+
+      $success = buffer_create_updates($text, array_keys(array_filter($form_state['values']['profiles'])), $image->uri, $form_state['values']['scheduled_at'], $form_state['values']['shorten_url']);
+
+      if ($success) {
+        drupal_set_message(t('Your publications has been scheduled.'));
+      }
+      else {
+        drupal_set_message(t('An error has been occurred during publication.'), 'error');
+      }
+    }
+    else {
+      $profile_ids = array_keys(array_filter($form_state['values']['profiles']));
+
+      foreach ($profile_ids as $pid) {
+        $text = $form_state['values']['text'][$pid];
+
+        if ($form_state['values']['append_url']) {
+          $text .= ' ' . url(drupal_get_path_alias('node/' . $form_state['values']['nid']), array('absolute' => TRUE));
+        }
+
+        $success = buffer_create_updates($text, $pid, $image->uri, $form_state['values']['scheduled_at'], $form_state['values']['shorten_url']);
+
+        if ($success) {
+          drupal_set_message(t('Your publications has been scheduled.'));
+        }
+        else {
+          drupal_set_message(t('An error has been occurred during publication.'), 'error');
+        }
+      }
+    }
+  }
+}
+
+
+/**
+ * Implements buffer_thumb_upload theme callback.
+ */
+function theme_buffer_thumb_upload($variables) {
+  $element = $variables['element'];
+
+  if (isset($element['#file']->uri)) {
+    $output = '<div id="edit-logo-ajax-wrapper"><div class="form-item form-type-managed-file form-item-logo"><span class="file">';
+    $output .= '<img style="height: 100px; margin-right: 10px; vertical-align: bottom; display: inline-block;" src="' . image_style_url('thumbnail', $element['#file']->uri) . '" />';
+    $output .= '</span><input type="submit" id="edit-' . $element['#name'] . '-remove-button" name="' . $element['#name'] . '_remove_button" value="Remove" class="form-submit ajax-processed">';
+    $output .= '<input type="hidden" name="' . $element['#name'] . '[fid]" value="' . $element['#file']->fid . '"></div></div>';
+    return $output;
+  }
+}
+
+
+/**
+ * Implements hook_form_FORM_ID_alter() for the node type form.
+ */
+function buffer_form_node_type_form_alter(&$form, &$form_state) {
+  $form['buffer'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Buffer'),
+    '#collapsible' => TRUE,
+    '#group' => 'additional_settings',
+    '#attached' => array(
+      'js' => array(
+        drupal_get_path('module', 'buffer') . '/js/buffer_vertical_tabs.js',
+      ),
+    ),
+  );
+
+  $form['buffer']['buffer'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Enable buffer'),
+    '#description' => t('Display buffer tab in each node of this content type.'),
+    '#default_value' => variable_get('buffer_' . $form['#node_type']->type, 0),
+  );
+}
+
+
+/**
+ * Implements hook_features_pipe_COMPONENT_alter().
+ */
+function buffer_features_pipe_node_alter(&$pipe, $data, $export) {
+  foreach ($data as $type) {
+    $pipe['variable'][] = 'buffer_' . $type;
+  }
+}
+
+
+/**
+ * Create one or more new status updates.
+ *
+ * @return
+ *   TRUE on success, FALSE otherwise.
+ */
+function buffer_create_updates($text, $pid, $image_uri, $scheduled_at, $shorten) {
+  $data = drupal_http_build_query(array(
+    'access_token' => variable_get('buffer_access_token', ''),
+    'text' => $text,
+    'profile_ids' => $pid,
+    'media[photo]' => file_create_url($image_uri),
+    'scheduled_at' => strtotime($scheduled_at),
+    'shorten' => ($shorten == 1) ? 'true' : 'false',
+  ));
+
+  $response = drupal_http_request('https://api.bufferapp.com/1/updates/create.json', array('method' => 'POST', 'data' => $data, 'headers' => array('Content-Type' => 'application/x-www-form-urlencoded')));
+
+  if ($response->code == 200) {
+    return TRUE;
+  }
+
+  return FALSE;
+}
+
+
+/**
+ * Returns an array of social media profiles connected to a users account.
+ *
+ * @return
+ *   array if no errors, FALSE otherwise.
+ */
+function buffer_get_profiles() {
+  $access_token = 'access_token=' . variable_get('buffer_access_token', '');
+
+  $profiles = drupal_http_request('https://api.bufferapp.com/1/profiles.json?' . $access_token);
+
+  if ($profiles->code == 200) {
+    return drupal_json_decode($profiles->data);;
+  }
+
+  return FALSE;
+}
+
+
+/**
+ * Permanently delete an existing status update.
+ *
+ * @return
+ *   TRUE on success, FALSE otherwise.
+ */
+function buffer_destroy_update($update) {
+  $access_token = 'access_token=' . variable_get('buffer_access_token', '');
+
+  $response = drupal_http_request('https://api.bufferapp.com/1/updates/' . $update . '/destroy.json?' . $access_token);
+
+  if ($response->code == 200) {
+    return TRUE;
+  }
+
+  return FALSE;
+}
+
+
+/**
+ * Returns an array of updates that are currently in the buffer for an individual social media profile.
+ *
+ * @return
+ *   array if no errors, FALSE otherwise.
+ */
+function buffer_get_pending_updates($pid) {
+  $access_token = 'access_token=' . variable_get('buffer_access_token', '');
+
+  $activity = drupal_http_request('https://api.bufferapp.com/1/profiles/' . $pid . '/updates/pending.json?' . $access_token);
+
+  if ($activity->code == 200) {
+    return drupal_json_decode($activity->data);
+  }
+
+  return FALSE;
+}
+
+
+/**
+ * Build form array for pending updates in an individual profile.
+ */
+function _buffer_build_pending_updates_form($activity, $profile) {
+  $form = array();
+
+  $form[] = array(
+    '#type' => 'markup',
+    '#markup' => '<div id="activity-' . $profile['id'] . '" class="activity"><h3 class="profile-title">' . $profile['formatted_service'] . ' (' . $profile['formatted_username'] . ')' . '</h3><table>',
+  );
+
+  foreach ($activity['updates'] as $update) {
+    $suffix = '</td><td>
+               <div id="update-' . $update['id'] . '" class="update">
+               <div class="message"><b>' . $update['text_formatted'] . '</b></div>
+               <div><span class="scheduled-time">Due at: ' . date('Y-m-d H:i', $update['due_at']) . '</span></div>
+               </div></td>
+               <td><a href="https://bufferapp.com/app/profile/' . $profile['id'] . '/buffer/queue">' . t('Edit') . '</a></td></tr>';
+
+    $form[$update['id']] = array(
+      '#type' => 'checkbox',
+      '#prefix' => '<tr><td>',
+      '#suffix' => $suffix,
+    );
+  }
+
+  if ($activity['total'] === 0) {
+    $form[] = array(
+      '#type' => 'markup',
+      '#markup' => '<div class="no-update"><p>' . t('No scheduled activity') . '</p></div>',
+    );
+  }
+
+  $form[] = array(
+    '#type' => 'markup',
+    '#markup' => '</table>',
+  );
+
+  $form[] = array(
+    '#type' => 'markup',
+    '#markup' => '</div>',
+  );
+
+  return $form;
+}
+
+
+/**
+ * Get a list of all image fields in a content type.
+ */
+function _buffer_image_fields($content_type) {
+  $fields = array();
+  $instances = field_info_instances('node', $content_type);
+
+  foreach ($instances as $name => $instance) {
+    $field = field_info_field($instance['field_name']);
+    if ($field['type'] == 'image') {
+      $fields[$instance['field_name']] = $instance['label'];
+    }
+  }
+
+  return $fields;
+}
+
+
+/**
+ * Determine whether the current user can access the buffer tab on the selected node.
+ *
+ * @return boolean
+ *   Whether access is allowed or not.
+ */
+function _buffer_access_buffer($node) {
+  $access = FALSE;
+
+  if ( (variable_get('buffer_' . $node->type, 0) == 1) && user_access('access buffer') ) $access = TRUE;
+
+  return $access;
+}
