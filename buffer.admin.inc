@@ -91,7 +91,7 @@ function buffer_scheduled_activity($form, &$form_state) {
     $form['activity']['delete'] = array(
       '#type' => 'submit',
       '#value' => t('Delete selected updates'),
-      '#attributes' => array('onclick' => 'if(!confirm("Do you really want to delete the selected updates?")){return false;}'),
+      '#attributes' => array('onclick' => 'if(!confirm("' . t('Do you really want to delete the selected updates?') . '")){return false;}'),
     );
   }
   else {

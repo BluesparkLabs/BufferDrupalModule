@@ -14,7 +14,7 @@ Drupal.behaviors.buffer_settings = {
     // Provide summary during content type configuration.
     $('fieldset#edit-buffer', context).drupalSetSummary(function(context) {
       var vals = [];
-      if ($('#edit-buffer--2', context).is(':checked')) {
+      if ($('input[name=buffer]', context).is(':checked')) {
         vals.push(Drupal.t('Enabled'));
       }
       else {

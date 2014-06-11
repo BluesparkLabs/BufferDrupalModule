@@ -84,6 +84,8 @@ function buffer_theme() {
  * Create the main form.
  */
 function buffer_social_form($form, &$form_state, $node) {
+  global $is_https;
+
   $form['#tree'] = TRUE;
 
   $form['nid'] = array(
@@ -132,7 +134,7 @@ function buffer_social_form($form, &$form_state, $node) {
     $form['activity']['delete'] = array(
       '#type' => 'submit',
       '#value' => t('Delete selected updates'),
-      '#attributes' => array('onclick' => 'if(!confirm("Do you really want to delete the selected updates?")){return false;}'),
+      '#attributes' => array('onclick' => 'if(!confirm("' . t('Do you really want to delete the selected updates?') . '")){return false;}'),
     );
 
     $options = array();
@@ -143,7 +145,7 @@ function buffer_social_form($form, &$form_state, $node) {
     }
 
     $form['profiles'] = array(
-      '#title' => t('Profiles') . ':',
+      '#title' => t('Profiles'),
       '#type' => 'checkboxes',
       '#options' => $options,
       '#default_value' => variable_get('buffer_profile_ids', array()),
@@ -180,7 +182,7 @@ function buffer_social_form($form, &$form_state, $node) {
   if ($override_text === FALSE) {
     $form['text']['global'] = array(
       '#type' => 'textarea',
-      '#title' => t('Text:'),
+      '#title' => t('Text'),
       '#resizable' => TRUE,
       '#rows' => 5,
       '#required' => TRUE,
@@ -228,9 +230,17 @@ function buffer_social_form($form, &$form_state, $node) {
     '#default_value' => '1',
   );
 
+  if ($is_https) {
+    $form['no_https'] = array(
+      '#title' => t('Use http instead of https for node url'),
+      '#type' => 'checkbox',
+      '#default_value' => '1',
+    );
+  }
+
   $form['image_source'] = array(
     '#type' => 'radios',
-    '#title' => t('Image source:'),
+    '#title' => t('Image source'),
     '#options' => array('custom' => 'Custom image', 'existing' => 'Existing image from field'),
     '#default_value' => 'existing',
     '#ajax' =>array(
@@ -255,7 +265,7 @@ function buffer_social_form($form, &$form_state, $node) {
   if ($image_source == 'custom') {
     $form['image']['image_custom'] = array(
       '#type' => 'managed_file',
-      '#title' => t('Image:'),
+      '#title' => t('Image'),
       '#description' => t('Allowed extensions: gif png jpg jpeg'),
       '#upload_location' => 'public://',
       '#theme' => 'buffer_thumb_upload',
@@ -268,7 +278,7 @@ function buffer_social_form($form, &$form_state, $node) {
   else {
     $fields = _buffer_image_fields($node->type);
     $form['image']['image_field'] = array(
-      '#title' => t('Select a field:'),
+      '#title' => t('Select a field'),
       '#type' => 'checkboxes',
       '#options' => $fields,
       '#required' => TRUE,
@@ -277,7 +287,7 @@ function buffer_social_form($form, &$form_state, $node) {
 
   $form['scheduled_at'] = array(
     '#type' => 'date_select',
-    '#title' => t('Scheduled At:'),
+    '#title' => t('Scheduled At'),
     '#default_value' => date('Y-m-d H:i'),
     '#required' => TRUE,
   );
@@ -365,6 +375,15 @@ function buffer_social_form_submit($form, &$form_state) {
     }
   }
   else {
+    global $is_https;
+
+    $https = FALSE;
+    if ($is_https) {
+      if ($form_state['values']['no_https'] != 1) {
+        $https = TRUE;
+      }
+    }
+
     if ($form_state['values']['image_source'] == 'existing') {
       $node = node_load($form_state['values']['nid']);
       $image_field = array_pop(array_keys(array_filter($form_state['values']['image']['image_field'])));
@@ -380,7 +399,7 @@ function buffer_social_form_submit($form, &$form_state) {
       $text = $form_state['values']['text']['global'];
 
       if ($form_state['values']['append_url']) {
-        $text .= ' ' . url('node/' . $form_state['values']['nid'], array('absolute' => TRUE));
+        $text .= ' ' . url('node/' . $form_state['values']['nid'], array('absolute' => TRUE, 'https' => $https));
       }
 
       $success = buffer_create_updates($text, array_keys(array_filter($form_state['values']['profiles'])), $image->uri, $form_state['values']['scheduled_at'], $form_state['values']['shorten_url']);
@@ -399,7 +418,8 @@ function buffer_social_form_submit($form, &$form_state) {
         $text = $form_state['values']['text'][$pid];
 
         if ($form_state['values']['append_url']) {
-          $text .= ' ' . url('node/' . $form_state['values']['nid'], array('absolute' => TRUE));
+          $node_url = url('node/' . $form_state['values']['nid'], array('absolute' => TRUE, 'https' => $https));
+          $text .= ' ' . $node_url;
         }
 
         $success = buffer_create_updates($text, $pid, $image->uri, $form_state['values']['scheduled_at'], $form_state['values']['shorten_url']);
@@ -466,6 +486,16 @@ function buffer_features_pipe_node_alter(&$pipe, $data, $export) {
 /**
  * Create one or more new status updates.
  *
+ * @param $text
+ *   The status update text
+ * @param $pid
+ *   An array of profile id’s that the status update should be sent to. Invalid profile_id’s will be silently ignored.
+ * @param $image_uri
+ *   Image URI.
+ * @param $scheduled_at
+ *   A date describing when the update should be posted.
+ * @param $shorten
+ *   If shorten is false links within the text will not be automatically shortened, otherwise they will.
  * @return
  *   TRUE on success, FALSE otherwise.
  */
@@ -509,6 +539,8 @@ function buffer_get_profiles() {
 /**
  * Permanently delete an existing status update.
  *
+ * @param $update
+ *   Update ID.
  * @return
  *   TRUE on success, FALSE otherwise.
  */
@@ -527,6 +559,8 @@ function buffer_destroy_update($update) {
 /**
  * Returns an array of updates that are currently in the buffer for an individual social media profile.
  *
+ * @param $pid
+ *   Profile ID.
  * @return
  *   array if no errors, FALSE otherwise.
  */
@@ -557,7 +591,7 @@ function _buffer_build_pending_updates_form($activity, $profile) {
     $suffix = '</td><td>
                <div id="update-' . $update['id'] . '" class="update">
                <div class="message"><b>' . $update['text_formatted'] . '</b></div>
-               <div><span class="scheduled-time">Due at: ' . date('Y-m-d H:i', $update['due_at']) . '</span></div>
+               <div><span class="scheduled-time">' . t('Due at @datetime', array('@datetime' => date('Y-m-d H:i', $update['due_at']))) . '</span></div>
                </div></td>
                <td><a href="https://bufferapp.com/app/profile/' . $profile['id'] . '/buffer/queue">' . t('Edit') . '</a></td></tr>';
 
@@ -608,13 +642,15 @@ function _buffer_image_fields($content_type) {
 /**
  * Determine whether the current user can access the buffer tab on the selected node.
  *
+ * @param $node
+ *   The node object.
  * @return boolean
  *   Whether access is allowed or not.
  */
 function _buffer_access_buffer($node) {
   $access = FALSE;
 
-  if ( (variable_get('buffer_' . $node->type, 0) == 1) && user_access('access buffer') ) {
+  if ((variable_get('buffer_' . $node->type, 0) == 1) && user_access('access buffer')) {
     $access = TRUE;
   }
 
