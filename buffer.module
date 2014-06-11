@@ -509,7 +509,8 @@ function buffer_create_updates($text, $pid, $image_uri, $scheduled_at, $shorten)
     'shorten' => ($shorten == 1) ? 'true' : 'false',
   ));
 
-  $response = drupal_http_request('https://api.bufferapp.com/1/updates/create.json', array('method' => 'POST', 'data' => $data, 'headers' => array('Content-Type' => 'application/x-www-form-urlencoded')));
+  $api_base_url = variable_get('buffer_api_base_url', 'https://api.bufferapp.com');
+  $response = drupal_http_request($api_base_url . '/1/updates/create.json', array('method' => 'POST', 'data' => $data, 'headers' => array('Content-Type' => 'application/x-www-form-urlencoded')));
 
   if ($response->code == 200) {
     return TRUE;
@@ -527,7 +528,8 @@ function buffer_create_updates($text, $pid, $image_uri, $scheduled_at, $shorten)
 function buffer_get_profiles() {
   $access_token = 'access_token=' . variable_get('buffer_access_token', '');
 
-  $profiles = drupal_http_request('https://api.bufferapp.com/1/profiles.json?' . $access_token);
+  $api_base_url = variable_get('buffer_api_base_url', 'https://api.bufferapp.com');
+  $profiles = drupal_http_request($api_base_url . '/1/profiles.json?' . $access_token);
 
   if ($profiles->code == 200) {
     return drupal_json_decode($profiles->data);;
@@ -547,7 +549,8 @@ function buffer_get_profiles() {
 function buffer_destroy_update($update) {
   $access_token = 'access_token=' . variable_get('buffer_access_token', '');
 
-  $response = drupal_http_request('https://api.bufferapp.com/1/updates/' . $update . '/destroy.json?' . $access_token);
+  $api_base_url = variable_get('buffer_api_base_url', 'https://api.bufferapp.com');
+  $response = drupal_http_request($api_base_url . '/1/updates/' . $update . '/destroy.json?' . $access_token);
 
   if ($response->code == 200) {
     return TRUE;
@@ -567,7 +570,8 @@ function buffer_destroy_update($update) {
 function buffer_get_pending_updates($pid) {
   $access_token = 'access_token=' . variable_get('buffer_access_token', '');
 
-  $activity = drupal_http_request('https://api.bufferapp.com/1/profiles/' . $pid . '/updates/pending.json?' . $access_token);
+  $api_base_url = variable_get('buffer_api_base_url', 'https://api.bufferapp.com');
+  $activity = drupal_http_request($api_base_url . '/1/profiles/' . $pid . '/updates/pending.json?' . $access_token);
 
   if ($activity->code == 200) {
     return drupal_json_decode($activity->data);

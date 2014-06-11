@@ -9,6 +9,7 @@
  * Implements hook_uninstall().
  */
 function buffer_uninstall() {
+  variable_del('buffer_api_base_url');
   variable_del('buffer_access_token');
   variable_del('buffer_profile_ids');
 

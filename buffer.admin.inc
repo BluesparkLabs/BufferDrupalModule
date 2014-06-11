@@ -11,6 +11,14 @@
 function buffer_admin_form($form, &$form_state) {
   $form = array();
 
+  $form['api_base_url'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Buffer API base url'),
+    '#description' => t('Enter a valid url without trailing slash'),
+    '#default_value' => variable_get('buffer_api_base_url', 'https://api.bufferapp.com'),
+    '#required' => TRUE,
+  );
+
   $form['access_token'] = array(
     '#type' => 'textfield',
     '#title' => t('Access Token'),
@@ -45,9 +53,19 @@ function buffer_admin_form($form, &$form_state) {
 }
 
 /**
+ * Validation callback for buffer_admin_form().
+ */
+function buffer_admin_form_validate($form, &$form_state) {
+  if (filter_var($form_state['values']['api_base_url'], FILTER_VALIDATE_URL, FILTER_FLAG_HOST_REQUIRED) === FALSE) {
+    form_set_error('api_base_url', t('Enter a valid url without trailing slash!'));
+  }
+}
+
+/**
  * Submit function for buffer_admin_form.
  */
 function buffer_admin_form_submit($form, &$form_state) {
+  variable_set('buffer_api_base_url', trim($form_state['values']['api_base_url']));
   variable_set('buffer_access_token', trim($form_state['values']['access_token']));
 
   if (isset($form_state['values']['profiles'])) {
